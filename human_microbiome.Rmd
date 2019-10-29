@@ -1,0 +1,291 @@
+---
+title: "Earth_microbiome_project"
+author: "GeZhu"
+date: "10/29/2019"
+output: html_document
+
+---
+## R Markdown - Moving picture project of eart microbiome project
+We used QIIME 2 to perform an analysis of GI human microbiome samples from two patients at four body sites at five different timepoints. The first sample was collected immediately followed by antibiotic intake. A study based on these samples was originally published in Caporaso et al. (2011). The data used in this project were sequenced on an Illumina HiSeq using the Earth Microbiome Project hypervariable region 4 (V4) 16S rRNA sequencing protocol.
+
+```{bash}
+mkdir qiime2-moving-pictures-tutorial
+cd qiime2-moving-pictures-tutorial
+```
+
+## Data aquisition from source
+Pull data from online source qiime2.org
+```{bash}
+wget \
+  -O "sample-metadata.tsv" \
+  "https://data.qiime2.org/2019.7/tutorials/moving-pictures/sample_metadata.tsv"
+```
+
+## Create folder for single end data
+create folder for small subset of single end data
+```{bash}
+mkdir emp-single-end-sequences
+```
+
+## Pull data off the source (barcode file and sequence file)
+single end sequence barcodes file
+```{bash}
+wget \
+  -O "emp-single-end-sequences/barcodes.fastq.gz" \
+  "https://data.qiime2.org/2019.7/tutorials/moving-pictures/emp-single-end-sequences/barcodes.fastq.gz"
+
+```
+
+## Pull data off the source (barcode file and sequence file)
+single end sequence sequence file
+```{bash}
+wget \
+  -O "emp-single-end-sequences/sequences.fastq.gz" \
+  "https://data.qiime2.org/2019.7/tutorials/moving-pictures/emp-single-end-sequences/sequences.fastq.gz"
+
+```
+
+## Output QIIME2 artifacts
+qiime tool import and output .qza file for QIIME2 artifact
+```{bash}
+qiime tools import \
+  --type EMPSingleEndSequences \
+  --input-path emp-single-end-sequences \
+  --output-path emp-single-end-sequences.qza
+```
+
+
+## demultiplexing sequences
+In order to demultiplex the sequences. We need to arrange each barcode with the associated sequence. Following commands with demultiplex the sequence files
+```{bash}
+qiime demux emp-single \
+  --i-seqs emp-single-end-sequences.qza \
+  --m-barcodes-file sample-metadata.tsv \
+  --m-barcodes-column barcode-sequence \
+  --o-per-sample-sequences demux.qza \
+  --o-error-correction-details demux-details.qza
+```
+summary of demultiplexed data
+```{bash}
+qiime demux summarize \
+  --i-data demux.qza \
+  --o-visualization demux.qzv
+```
+
+
+## Sequence quality controls
+The following bash scripts will perform quality control on the qiime2 sequence. DADA2 and Deblur are basic quality score based filtering. 
+1. DADA2:
+quality plots
+```{bash}
+qiime dada2 denoise-single \
+  --i-demultiplexed-seqs demux.qza \
+  --p-trim-left 0 \
+  --p-trunc-len 120 \
+  --o-representative-sequences rep-seqs-dada2.qza \
+  --o-table table-dada2.qza \
+  --o-denoising-stats stats-dada2.qza
+```
+
+output visualization:
+```{bash}
+qiime metadata tabulate \
+  --m-input-file stats-dada2.qza \
+  --o-visualization stats-dada2.qzv
+```
+
+continue the project with "FeatureTable":
+```{bash}
+mv rep-seqs-dada2.qza rep-seqs.qza
+mv table-dada2.qza table.qza
+```
+
+2. Deblur
+Deblur uses sequence error profiles to draw association between error sequence reads and correct biological reads. Deblur usually resulting in a high quality sequence variant data due to the nature of error sequence came from correct biological reads. 
+```{bash}
+qiime quality-filter q-score \
+ --i-demux demux.qza \
+ --o-filtered-sequences demux-filtered.qza \
+ --o-filter-stats demux-filter-stats.qza
+```
+
+denoise process
+```{bash}
+qiime deblur denoise-16S \
+  --i-demultiplexed-seqs demux-filtered.qza \
+  --p-trim-length 120 \
+  --o-representative-sequences rep-seqs-deblur.qza \
+  --o-table table-deblur.qza \
+  --p-sample-stats \
+  --o-stats deblur-stats.qza
+```
+
+deblur visualization 
+```{bash}
+qiime metadata tabulate \
+  --m-input-file demux-filter-stats.qza \
+  --o-visualization demux-filter-stats.qzv
+qiime deblur visualize-stats \
+  --i-deblur-stats deblur-stats.qza \
+  --o-visualization deblur-stats.qzv
+```
+
+
+```{bash}
+mv rep-seqs-deblur.qza rep-seqs.qza
+mv table-deblur.qza table.qza
+```
+
+## Generate a tree for phylogenetic diversity analyses
+ Faith’s Phylogenetic Diversity and weighted and unweighted UniFrac analysis in qiime2. To generate a phylogenetic tree we will use align-to-tree-mafft-fasttree pipeline from the q2-phylogeny plugin.
+```{bash}
+qiime phylogeny align-to-tree-mafft-fasttree \
+  --i-sequences rep-seqs.qza \
+  --o-alignment aligned-rep-seqs.qza \
+  --o-masked-alignment masked-aligned-rep-seqs.qza \
+  --o-tree unrooted-tree.qza \
+  --o-rooted-tree rooted-tree.qza
+```
+
+1. Alpha and beta diversity analysis
+Utilizing q2-diversity plugin
+```{bash}
+qiime diversity core-metrics-phylogenetic \
+  --i-phylogeny rooted-tree.qza \
+  --i-table table.qza \
+  --p-sampling-depth 1103 \
+  --m-metadata-file sample-metadata.tsv \
+  --output-dir core-metrics-results
+```
+
+2. test for associations between categorical metadata columns and alpha diversity data.
+```{bash}
+qiime diversity alpha-group-significance \
+  --i-alpha-diversity core-metrics-results/faith_pd_vector.qza \
+  --m-metadata-file sample-metadata.tsv \
+  --o-visualization core-metrics-results/faith-pd-group-significance.qzv
+
+qiime diversity alpha-group-significance \
+  --i-alpha-diversity core-metrics-results/evenness_vector.qza \
+  --m-metadata-file sample-metadata.tsv \
+  --o-visualization core-metrics-results/evenness-group-significance.qzv
+```
+
+3. analyze sample composition in the context of categorical metadata using PERMANOVA
+```{bash}
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/unweighted_unifrac_distance_matrix.qza \
+  --m-metadata-file sample-metadata.tsv \
+  --m-metadata-column body-site \
+  --o-visualization core-metrics-results/unweighted-unifrac-body-site-significance.qzv \
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/unweighted_unifrac_distance_matrix.qza \
+  --m-metadata-file sample-metadata.tsv \
+  --m-metadata-column subject \
+  --o-visualization core-metrics-results/unweighted-unifrac-subject-group-significance.qzv \
+  --p-pairwise
+```
+
+4. exploring microbial community composition in the context of sample metadata
+```{bash}
+qiime emperor plot \
+  --i-pcoa core-metrics-results/unweighted_unifrac_pcoa_results.qza \
+  --m-metadata-file sample-metadata.tsv \
+  --p-custom-axes days-since-experiment-start \
+  --o-visualization core-metrics-results/unweighted-unifrac-emperor-days-since-experiment-start.qzv
+
+qiime emperor plot \
+  --i-pcoa core-metrics-results/bray_curtis_pcoa_results.qza \
+  --m-metadata-file sample-metadata.tsv \
+  --p-custom-axes days-since-experiment-start \
+  --o-visualization core-metrics-results/bray-curtis-emperor-days-since-experiment-start.qzv
+```
+
+## Alpha rarefaction plotting
+We explore alpha diversity as a function of sampling depth using the qiime diversity alpha-rarefaction visualizer.
+```{bash}
+qiime diversity alpha-rarefaction \
+  --i-table table.qza \
+  --i-phylogeny rooted-tree.qza \
+  --p-max-depth 4000 \
+  --m-metadata-file sample-metadata.tsv \
+  --o-visualization alpha-rarefaction.qzv
+```
+
+1. Taxonomic analysis
+The first step in this process is to assign taxonomy to the sequences in our FeatureData[Sequence] QIIME 2 artifact
+```{bash}
+wget \
+  -O "gg-13-8-99-515-806-nb-classifier.qza" \
+  "https://data.qiime2.org/2019.7/common/gg-13-8-99-515-806-nb-classifier.qza"
+```
+
+```{bash}
+qiime feature-classifier classify-sklearn \
+  --i-classifier gg-13-8-99-515-806-nb-classifier.qza \
+  --i-reads rep-seqs.qza \
+  --o-classification taxonomy.qza
+
+qiime metadata tabulate \
+  --m-input-file taxonomy.qza \
+  --o-visualization taxonomy.qzv
+```
+
+2. view the taxonomic composition of our samples with interactive bar plots.
+```{bash}
+qiime taxa barplot \
+  --i-table table.qza \
+  --i-taxonomy taxonomy.qza \
+  --m-metadata-file sample-metadata.tsv \
+  --o-visualization taxa-bar-plots.qzv
+```
+
+3. creating a feature table that contains only the gut samples
+```{bash}
+qiime feature-table filter-samples \
+  --i-table table.qza \
+  --m-metadata-file sample-metadata.tsv \
+  --p-where "[body-site]='gut'" \
+  --o-filtered-table gut-table.qza
+```
+output artifacts:
+```{bash}
+qiime composition add-pseudocount \
+  --i-table gut-table.qza \
+  --o-composition-table comp-gut-table.qza
+```
+```{bash}
+qiime composition ancom \
+  --i-table comp-gut-table.qza \
+  --m-metadata-file sample-metadata.tsv \
+  --m-metadata-column subject \
+  --o-visualization ancom-subject.qzv
+```
+
+4.Performing a differential abundance test at a specific taxonomic level.
+```{bash}
+qiime taxa collapse \
+  --i-table gut-table.qza \
+  --i-taxonomy taxonomy.qza \
+  --p-level 6 \
+  --o-collapsed-table gut-table-l6.qza
+
+qiime composition add-pseudocount \
+  --i-table gut-table-l6.qza \
+  --o-composition-table comp-gut-table-l6.qza
+
+qiime composition ancom \
+  --i-table comp-gut-table-l6.qza \
+  --m-metadata-file sample-metadata.tsv \
+  --m-metadata-column subject \
+  --o-visualization l6-ancom-subject.qzv
+```
+
+
+
+
+
+ 
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
